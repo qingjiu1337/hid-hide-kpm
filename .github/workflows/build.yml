@@ -13,7 +13,6 @@ on:
 
 env:
   KP_REPO: bmax121/KernelPatch
-  KP_REF: master
   TOOLCHAIN: aarch64-linux-gnu-
 
 jobs:
@@ -27,7 +26,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ env.KP_REPO }}
-          ref: ${{ env.KP_REF }}
           path: KernelPatch
 
       - name: Install aarch64 toolchain
