@@ -39,6 +39,30 @@ jobs:
           file hid_hide.kpm
           aarch64-linux-gnu-readelf -h hid_hide.kpm | head -n 12
 
+      # KPM 加载器解析不了任何未定义符号就会拒绝加载。
+      # 只允许引用 KP 稳定导出的符号，出现其他符号（如 __stack_chk_guard、
+      # libgcc 原子辅助函数）说明编译参数或代码有误，直接判失败。
+      - name: Check undefined symbols
+        run: |
+          pip install --quiet pyelftools
+          python3 - <<'EOF'
+          from elftools.elf.elffile import ELFFile
+          ALLOW = {
+              "printk", "kallsyms_lookup_name", "compat_copy_to_user",
+              "hook_wrap", "hook_unwrap_remove",
+          }
+          with open("hid_hide.kpm", "rb") as f:
+              elf = ELFFile(f)
+              symtab = elf.get_section_by_name(".symtab")
+              undef = [s.name for s in symtab.iter_symbols()
+                       if s["st_shndx"] == "SHN_UNDEF" and s.name]
+          bad = [n for n in undef if n not in ALLOW and not n.startswith("kf_")]
+          print("undefined symbols:", undef)
+          if bad:
+              raise SystemExit("unexpected undefined symbols: %s" % bad)
+          print("symbol check passed")
+          EOF
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

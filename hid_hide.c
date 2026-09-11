@@ -111,17 +111,35 @@ static inline void hh_irq_restore(uint64_t flags)
     __asm__ volatile("msr daif, %0" : : "r"(flags));
 }
 
+/* ldxr/stxr 独占访问 trylock。
+ * 不用 __atomic 内建函数：部分交叉工具链会将其编译为 __aarch64_swp*_acq 等
+ * libgcc 辅助函数调用，KPM 加载器无法解析这类符号会直接拒绝加载。 */
+static inline int hh_trylock_asm(void)
+{
+    unsigned int ret, one = 1;
+    asm volatile(
+        "   ldaxr %w0, %2\n"
+        "   cbnz  %w0, 1f\n"
+        "   stlxr %w0, %w1, %2\n"
+        "1:\n"
+        : "=&r"(ret), "=&r"(one), "+Q"(g_state_lock)
+        :
+        : "memory");
+    return ret == 0;
+}
+
 static uint64_t hh_lock(void)
 {
     uint64_t flags = hh_irq_save();
-    while (__atomic_test_and_set(&g_state_lock, __ATOMIC_ACQUIRE))
-        ;
+    while (!hh_trylock_asm())
+        asm volatile("yield");
     return flags;
 }
 
 static void hh_unlock(uint64_t flags)
 {
-    __atomic_clear(&g_state_lock, __ATOMIC_RELEASE);
+    /* stlr 释放语义写 0 解锁 */
+    asm volatile("stlr wzr, %0" : : "Q"(g_state_lock) : "memory");
     hh_irq_restore(flags);
 }
 
@@ -504,6 +522,8 @@ static void before_input_devices_seq_show(hook_fargs2_t *args, void *udata)
 
 /* ============================ Hook 安装/卸载 ============================ */
 
+/* 直接调用 KP 稳定导出符号 hook_wrap(func, argno, before, after, udata)，
+ * 不经头文件中的 hook_wrapN 内联包装，保证 0.11.3 - main 的 ABI 兼容 */
 static int hh_hook2(const char *sym, void *before, void *after,
                     unsigned long *fn_out)
 {
@@ -514,7 +534,7 @@ static int hh_hook2(const char *sym, void *before, void *after,
         logkw("sys: symbol %s not found, skip\n", sym);
         return 0; /* 降级：不视为致命错误 */
     }
-    err = hook_wrap2((void *)addr, (hook_chain2_callback)before, (hook_chain2_callback)after, NULL);
+    err = hook_wrap((void *)addr, 2, before, after, NULL);
     if (err != HOOK_NO_ERR) {
         logke("sys: hook %s failed: %d\n", sym, (int)err);
         return 0;
@@ -534,7 +554,7 @@ static int hh_hook3(const char *sym, void *before, void *after,
         logkw("sys: symbol %s not found, skip\n", sym);
         return 0;
     }
-    err = hook_wrap3((void *)addr, (hook_chain3_callback)before, (hook_chain3_callback)after, NULL);
+    err = hook_wrap((void *)addr, 3, before, after, NULL);
     if (err != HOOK_NO_ERR) {
         logke("sys: hook %s failed: %d\n", sym, (int)err);
         return 0;
@@ -554,7 +574,7 @@ static int hh_hook4(const char *sym, void *before, void *after,
         logkw("sys: symbol %s not found, skip\n", sym);
         return 0;
     }
-    err = hook_wrap4((void *)addr, (hook_chain4_callback)before, (hook_chain4_callback)after, NULL);
+    err = hook_wrap((void *)addr, 4, before, after, NULL);
     if (err != HOOK_NO_ERR) {
         logke("sys: hook %s failed: %d\n", sym, (int)err);
         return 0;
@@ -801,29 +821,30 @@ static long hh_exit(void *reserved)
 {
     (void)reserved;
 
-    /* 逐个卸载，未安装的（地址为 0）自动跳过 */
+    /* 逐个卸载，未安装的（地址为 0）自动跳过。
+     * 直接调用稳定导出符号 hook_unwrap_remove，同 hook_wrap。 */
     if (g_fn_hid_connect) {
-        hook_unwrap((void *)g_fn_hid_connect, before_hid_connect, NULL);
+        hook_unwrap_remove((void *)g_fn_hid_connect, before_hid_connect, NULL, 1);
         g_fn_hid_connect = 0;
     }
     if (g_fn_evdev_connect) {
-        hook_unwrap((void *)g_fn_evdev_connect, before_evdev_connect, NULL);
+        hook_unwrap_remove((void *)g_fn_evdev_connect, before_evdev_connect, NULL, 1);
         g_fn_evdev_connect = 0;
     }
     if (g_fn_hiddev_connect) {
-        hook_unwrap((void *)g_fn_hiddev_connect, before_hiddev_connect, NULL);
+        hook_unwrap_remove((void *)g_fn_hiddev_connect, before_hiddev_connect, NULL, 1);
         g_fn_hiddev_connect = 0;
     }
     if (g_fn_hidraw_connect) {
-        hook_unwrap((void *)g_fn_hidraw_connect, before_hidraw_connect, NULL);
+        hook_unwrap_remove((void *)g_fn_hidraw_connect, before_hidraw_connect, NULL, 1);
         g_fn_hidraw_connect = 0;
     }
     if (g_fn_input_handle_event) {
-        hook_unwrap((void *)g_fn_input_handle_event, before_input_handle_event, NULL);
+        hook_unwrap_remove((void *)g_fn_input_handle_event, before_input_handle_event, NULL, 1);
         g_fn_input_handle_event = 0;
     }
     if (g_fn_input_devices_seq_show) {
-        hook_unwrap((void *)g_fn_input_devices_seq_show, before_input_devices_seq_show, NULL);
+        hook_unwrap_remove((void *)g_fn_input_devices_seq_show, before_input_devices_seq_show, NULL, 1);
         g_fn_input_devices_seq_show = 0;
     }
 
