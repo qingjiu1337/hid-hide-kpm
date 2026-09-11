@@ -1,0 +1,3 @@
+# 统一 LF 行尾（Makefile 在 Linux/WSL 下依赖 LF）
+* text=auto eol=lf
+*.kpm binary
