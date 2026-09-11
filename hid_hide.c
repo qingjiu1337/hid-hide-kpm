@@ -23,7 +23,7 @@
 /* ============================ 常量与配置 ============================ */
 
 #define HH_MODULE_NAME     "hid-hide"
-#define HH_MODULE_VERSION  "1.0.0"
+#define HH_MODULE_VERSION  "1.0"
 
 #define HH_TARGET_MAX   32     /* 最大目标数 */
 #define HH_TOKEN_LEN    64     /* 名称 token 最长（含 NUL） */
@@ -836,8 +836,8 @@ static long hh_exit(void *reserved)
 KPM_NAME(HH_MODULE_NAME);
 KPM_VERSION(HH_MODULE_VERSION);
 KPM_LICENSE("GPL v2");
-KPM_AUTHOR("hid-hide-kpm");
-KPM_DESCRIPTION("拦截键鼠注册 隐藏相关节点");
+KPM_AUTHOR("倾九");
+KPM_DESCRIPTION("https://github.com/qingjiu1337/hid-hide-kpm");
 
 KPM_INIT(hh_init);
 KPM_CTL0(hh_control_targets);
