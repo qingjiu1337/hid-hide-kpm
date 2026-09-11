@@ -1,0 +1,58 @@
+name: Build KPM
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "hid_hide.c"
+      - "hid_hide.lds"
+      - "Makefile"
+      - ".github/workflows/build.yml"
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  KP_REPO: bmax121/KernelPatch
+  KP_REF: master
+  TOOLCHAIN: aarch64-linux-gnu-
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout module
+        uses: actions/checkout@v4
+
+      - name: Checkout KernelPatch
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.KP_REPO }}
+          ref: ${{ env.KP_REF }}
+          path: KernelPatch
+
+      - name: Install aarch64 toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: Build
+        run: |
+          make TARGET_COMPILE=${{ env.TOOLCHAIN }} KP_DIR="$GITHUB_WORKSPACE/KernelPatch"
+          file hid_hide.kpm
+          aarch64-linux-gnu-readelf -h hid_hide.kpm | head -n 12
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hid_hide-kpm
+          path: hid_hide.kpm
+          if-no-files-found: error
+
+      - name: Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" hid_hide.kpm \
+            --title "hid-hide $GITHUB_REF_NAME" \
+            --generate-notes
